@@ -1,0 +1,42 @@
+name: Pre-RFC discussion
+description: Discuss scope and direction before drafting an RFC
+title: "Pre-RFC: <concise topic>"
+labels: [pre-rfc]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this to validate that the proposal warrants an RFC and to collect early feedback.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What is the problem and why now?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope & goals
+      description: What outcomes are in scope? What is explicitly out of scope?
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Early approach ideas
+      description: Any initial design directions or constraints to consider
+  - type: input
+    id: stakeholders
+    attributes:
+      label: Stakeholders
+      description: Teams/roles who should be involved
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: Readiness
+      options:
+        - label: This likely needs an RFC
+        - label: I will draft the RFC
+
+

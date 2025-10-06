@@ -1,0 +1,33 @@
+name: Auto request reviewers
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  request:
+    permissions:
+      pull-requests: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Determine reviewers by paths
+        id: detect
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            platform:
+              - 'rfcs/platform/**'
+            backend:
+              - 'rfcs/backend/**'
+            mobile:
+              - 'rfcs/mobile/**'
+      - name: Request reviewers
+        if: steps.detect.outputs.platform == 'true' || steps.detect.outputs.backend == 'true' || steps.detect.outputs.mobile == 'true'
+        uses: kentaro-m/auto-assign-action@v2.2.2
+        with:
+          configuration-path: .github/auto-assign.yml
+
+

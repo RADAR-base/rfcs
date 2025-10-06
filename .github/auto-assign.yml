@@ -1,0 +1,38 @@
+addReviewers: true
+addAssignees: false
+reviewers:
+  # default fallbacks
+  - yatharthranjan
+  - afolarin
+  - mpgxvii
+  - pvannierop
+
+skipKeywords:
+  - WIP
+
+numberOfReviewers: 0
+
+filter:
+  - label: "area: platform"
+    reviewers:
+      - yatharthranjan
+      - afolarin
+      - baixiac
+      - mpgxvii
+      - pvannierop
+  - label: "area: backend"
+    reviewers:
+      - yatharthranjan
+      - afolarin
+      - mpgxvii
+      - pvannierop
+      - this-Aditya
+      - ewelinagr
+  - label: "area: mobile"
+    reviewers:
+      - mpgxvii
+      - this-Aditya
+      - ec18130
+      - peyman-mohtashami
+
+

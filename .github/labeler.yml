@@ -1,0 +1,15 @@
+# Auto-label PRs based on changed file paths
+rfc:
+  - rfcs/**
+meta:
+  - .github/**
+docs:
+  - rfcs/media/**
+"area: platform":
+  - rfcs/platform/**
+"area: backend":
+  - rfcs/backend/**
+"area: mobile":
+  - rfcs/mobile/**
+
+
