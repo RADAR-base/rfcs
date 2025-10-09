@@ -1,0 +1,24 @@
+name: Require area label
+
+on:
+  pull_request_target:
+    types: [opened, labeled, unlabeled, synchronize, reopened, edited]
+
+jobs:
+  check-area-label:
+    permissions:
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check area label present
+        uses: mheap/github-action-required-labels@v5
+        with:
+          mode: minimum
+          count: 1
+          labels: "area: platform,area: backend,area: mobile,area: data-analytics,area: general"
+          add_comment: true
+          message: |
+            This PR is missing an area label. Please add at least one of:
+            area: platform | area: backend | area: mobile | area: data-analytics | area: general
+
+

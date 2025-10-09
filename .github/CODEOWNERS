@@ -1,0 +1,20 @@
+# Default owners for RFCs repository
+*       @radar-base/admins
+
+# RFCs
+rfcs/** @radar-base/admins
+
+# Component ownership
+# Organize RFCs under these folders to route reviews automatically
+rfcs/platform/**  @yatharthranjan @afolarin @baixiac @mpgxvii @pvannierop
+rfcs/backend/**   @yatharthranjan @afolarin @mpgxvii @pvannierop @this-Aditya @ewelinagr
+rfcs/mobile/**    @mpgxvii @this-Aditya @ec18130 @peyman-mohtashami
+
+# New areas
+rfcs/data-analytics/**  @afolarin @Hsankesara 
+rfcs/general/**         @yatharthranjan @afolarin @mpgxvii @pvannierop
+
+# GitHub metadata and workflows
+.github/** @radar-base/admins
+
+

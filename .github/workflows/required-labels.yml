@@ -1,0 +1,24 @@
+name: Require RFC labels
+
+on:
+  pull_request_target:
+    types: [opened, labeled, unlabeled, synchronize, reopened, edited]
+
+jobs:
+  check-labels:
+    permissions:
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required labels
+        uses: mheap/github-action-required-labels@v5
+        with:
+          mode: exactly
+          count: 1
+          labels: "status: draft,status: accepted,status: rejected,status: superseded,status: implemented"
+          add_comment: true
+          message: |
+            This PR is missing a required status label. Please add one of:
+            status: draft | status: accepted | status: rejected | status: superseded | status: implemented
+
+
