@@ -12,7 +12,7 @@ Checklist
 - [ ] Added to index table in `README.md`
 - [ ] Considered alternatives and documented open questions
 - [ ] Applied appropriate status label (one of: draft, accepted, rejected, superseded, implemented)
-- [ ] Applied area/type labels as relevant (e.g., platform, backend, mobile, privacy; design, process)
+- [ ] Applied area/type labels as relevant (e.g., platform, backend, mobile, data-analytics, general, privacy; design, process)
 
 Reviewers
 ---------

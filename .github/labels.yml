@@ -41,6 +41,14 @@
   color: d93f0b
   description: Mobile apps and SDKs
 
+- name: area: data-analytics
+  color: 0e8a16
+  description: Data pipelines, warehousing, BI, metrics, experimentation
+
+- name: area: general
+  color: 1f6feb
+  description: Cross-cutting or domain-agnostic RFCs
+
 - name: area: privacy
   color: 0b8769
   description: Security, privacy, compliance

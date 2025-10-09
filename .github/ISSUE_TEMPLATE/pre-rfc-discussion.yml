@@ -31,6 +31,19 @@ body:
     attributes:
       label: Stakeholders
       description: Teams/roles who should be involved
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Select the primary area for this discussion
+      options:
+        - platform
+        - backend
+        - mobile
+        - data-analytics
+        - general
+    validations:
+      required: true
   - type: checkboxes
     id: readiness
     attributes:

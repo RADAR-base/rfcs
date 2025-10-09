@@ -15,10 +15,10 @@ jobs:
         with:
           mode: minimum
           count: 1
-          labels: "area: platform,area: backend,area: mobile"
+          labels: "area: platform,area: backend,area: mobile,area: data-analytics,area: general"
           add_comment: true
           message: |
             This PR is missing an area label. Please add at least one of:
-            area: platform | area: backend | area: mobile
+            area: platform | area: backend | area: mobile | area: data-analytics | area: general
 
 

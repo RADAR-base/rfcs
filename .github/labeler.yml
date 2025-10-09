@@ -12,4 +12,10 @@ docs:
 "area: mobile":
   - rfcs/mobile/**
 
+"area: data-analytics":
+  - rfcs/data-analytics/**
+
+"area: general":
+  - rfcs/general/**
+
 

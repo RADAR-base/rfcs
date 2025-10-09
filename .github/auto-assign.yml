@@ -35,4 +35,16 @@ filter:
       - ec18130
       - peyman-mohtashami
 
+  - label: "area: data-analytics"
+    reviewers:
+      - afolarin
+      - Hsankesara
+
+  - label: "area: general"
+    reviewers:
+      - yatharthranjan
+      - afolarin
+      - mpgxvii
+      - pvannierop
+
 

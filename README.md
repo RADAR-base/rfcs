@@ -9,10 +9,11 @@ Quick start
 -----------
 1. Fork this repository.
 2. Create a new branch for your RFC.
-3. Copy `rfcs/0000-template.md` to a new file `rfcs/NNNN-your-title.md` where `NNNN` is the next available RFC number. Place it under an area folder if applicable (e.g., `rfcs/platform/NNNN-your-title.md`).
+3. Copy `rfcs/0000-template.md` to a new file `rfcs/NNNN-your-title.md` where `NNNN` is the next available RFC number. Place it under an area folder if applicable (e.g., `rfcs/platform/NNNN-your-title.md`, `rfcs/backend/NNNN-your-title.md`, `rfcs/mobile/NNNN-your-title.md`, `rfcs/data-analytics/NNNN-your-title.md`, or `rfcs/general/NNNN-your-title.md`).
 4. Fill in all sections.
 5. Open a Pull Request using the provided template.
 6. Apply labels: one `status:` label and at least one `area:` label (see below). Labels are auto-suggested based on file paths.
+7. Link any related issues or discussions directly in the RFC body, such as Pre-RFC discussions (e.g., `RADAR-base/<repo>#<123>`) using the `Discussion` field in the RFC template.
 
 Lifecycle
 ---------
@@ -36,9 +37,9 @@ The RFC process is facilitated by the RADAR-base maintainers. See `CONTRIBUTING.
 
 Areas and ownership
 -------------------
-- Area folders: `rfcs/platform/`, `rfcs/backend/`, `rfcs/mobile/`
+- Area folders: `rfcs/platform/`, `rfcs/backend/`, `rfcs/mobile/`, `rfcs/data-analytics/`, `rfcs/general/`
 - CODEOWNERS: PRs touching these folders auto-request domain reviewers
-- Labels: use one of `area: platform`, `area: backend`, `area: mobile`
+- Labels: use one of `area: platform`, `area: backend`, `area: mobile`, `area: data-analytics`, `area: general`
 
 Status and label requirements
 -----------------------------
