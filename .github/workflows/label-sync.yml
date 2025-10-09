@@ -13,7 +13,6 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
-      metadata: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
