@@ -3,7 +3,7 @@ RFC: 0002
 Title: Just In Time Interventions Platform
 Author(s): Heet Sankesara (@hsankesata)
 Status: Draft
-Created: <2025-11-24>
+Created: 2025-11-24
 Updated:
 Discussion:
 ---
@@ -20,14 +20,14 @@ Past work that used JITAI have been focused on specific use case and is not gene
 Non-Goals
 ---------
 
-it doesn't cover the development of specific intervention applications, but rather the platform to run those applications.
+It doesn't cover the development of specific intervention applications, but rather the platform to run those applications.
 
 Guide-level explanation
 -----------------------
 
 Explain the feature/change as if to a new contributor or user. Include UX flows, examples, and diagrams as needed.
 
-The first step towards building a just-in-time intervention architecture is to design a generalisable and scalable architecture. This is an essential first step that could help us understand what we could achieve and what the constraints and limitations are. As can be seen in the figure 1, we aim to drive the JITAI system using configs, as shown in the config below.
+The JITAI platform will be driven by configuration files that define various tasks such as data checks, model training, and inference. These configurations will specify the schedule, dependencies, parameters, and actions to be taken based on the outcomes of these tasks. Below is an example configuration file that illustrates how different tasks can be defined and orchestrated within the JITAI platform.
 
 ```yaml
 model_name: Sample  # No model needed
@@ -98,16 +98,14 @@ tasks:
 
 ```
 
+These configurations will be read by an orchestration tool (like Airflow) that will generate and schedule the corresponding data processing pipelines. The pipelines will handle data ingestion, preprocessing, model training, inference, and action execution based on the defined schedules and dependencies. The Airflow UI below shows an example of how the generated pipeline would look like based on the above configuration. All the tasks with `dynamic` tags are generated based on the config file.
+
 ![Airflow UI](https://external-content.duckduckgo.com/iu/?u=http%3A%2F%2Fdrive.google.com/uc?id=1_VzuJr76wYgGTw-0LqIARIZre309suCq)
 
 Reference-level design
 ----------------------
 
-Precise, technical details: architecture, data models, APIs, configuration, migrations, security/privacy considerations, performance characteristics, and failure modes.
-
-### Technical details
-
-Those configs can be stored in a GitHub Repo, which we can sync frequently using a GitHub sync in the Kubernetes cluster as described in Figure 1 below.
+The configs can be stored in a GitHub Repo, which we can sync frequently using a GitHub sync in the Kubernetes cluster as described in Figure 1 below.
 
 ![Airflow UI](https://docs.google.com/drawings/d/e/2PACX-1vRFoXLS5zKhosYTjzFOb9ivlnrnwPnBoliy9-AFSKfVsUAMXJGU5aMfZO0Vi6dz05Sr2yXV2-9PwUIe/pub?w=1218&h=825)
 
@@ -119,15 +117,14 @@ Once the flow pipeline is in place, it can read data directly from any Kafka top
 
 Another factor that we have considered is that we could possibly need GPUs for training or even for inference if we are using large deep learning models. This could add substantive cost if we do it in AWS, where radar-base is deployed. Hence, we decided it would be good to have a feature to offload the training/inference process to external servers, where we have already secured GPUs. We can deploy the model training module there, and it can run the training when requested. This could save the cost of renting GPUs on AWS. We’ll make the training module run as a REST client so it can be deployed to any external servers.  Additionally, we’ll deploy a machine learning lifecycle tool to monitor the training process and hyperparameters. We have used MLflow in the previous system and will use it in this iteration as well.
 
-Lastly, we’ll deploy an ETL tool to process the streaming data in real time. This can accelerate the feature generation process especially during the just in time interventions. We can further plan to create an ETL extension that can run the pipelines in RADAR-base analytics using radarpipeline. Since ETL frameworks like Apache Flink already use Spark in the backend, it would work well with radarpipeline. Moreover we can create a Flink connector in the radarpipeline using PyFlink making it easy to run pipelines.
+Lastly, we’ll deploy an ETL tool to process the streaming data in real time. This can accelerate the feature generation process especially during the just in time interventions. We can further plan to create an ETL extension that can run the pipelines in [RADAR-base analytics](https://github.com/RADAR-base-Analytics) using [radarpipeline](https://github.com/radaR-base/radarpipeline/). Since ETL frameworks like Apache Flink already use Spark in the backend, it would work well with radarpipeline. Moreover we can create a Flink connector in the radarpipeline using PyFlink making it easy to run pipelines.
 
-Moreover, NiFi provides several easy-to-create, customisable pipelines that can send requests to the RADAR-App server for sending participants' notifications and to external servers such as clinician dashboards or emails to research time about participant disengagement. Nifi supports a wide range of processors, which makes it an ideal tool to schedule different types of interventions and makes it easier to integrate newer requirements.
-
+Moreover, NiFi provides several easy-to-create, customisable pipelines that can send requests to the RADAR-App server for sending participants' notifications and to external servers such as clinician dashboards or emails to research time about participant disengagement. NiFi supports a wide range of processors, which makes it an ideal tool to schedule different types of interventions and makes it easier to integrate newer requirements.
 
 Compatibility and migration
 ---------------------------
 
-Not applicable for this RFC.
+Not applicable for this RFC as this is a new feature.
 
 Alternatives considered
 -----------------------
@@ -138,8 +135,6 @@ For the orchestration tool, we considered using other tools like Prefect and Gag
 Operational considerations
 --------------------------
 
-Rollout, monitoring, observability, feature flags, and rollback strategy.
-
 We can monitor the JITAI platform using Airflow's built-in monitoring tools. Airflow provides a web-based UI that allows us to monitor the status of our workflows, view logs, and set up alerts for failures. We can also integrate Airflow with external monitoring tools like Prometheus and Grafana for more advanced monitoring and alerting capabilities.
 
 Security and privacy
@@ -149,8 +144,6 @@ The biggest security and privacy concern with the JITAI platform is that it allo
 
 Testing strategy
 ----------------
-
-Unit/integration/e2e tests, validation plans, test data, and success metrics.
 
 We're planning to implement unit tests for individual components of the JITAI platform, including the config parser, data processing modules, and action handlers. Integration tests will be conducted to ensure that the different components work together seamlessly. End-to-end tests will simulate real-world scenarios to validate the entire workflow from config ingestion to intervention delivery.
 
@@ -170,4 +163,6 @@ Open questions
 References
 ----------
 
-Links to prior art, related issues/PRs, and documentation.
+[Model Builder](https://github.com/RADAR-base/model-builder) - A platform for building and deploying machine learning models within the RADAR-base ecosystem. 
+
+[NiFi Helm chart](https://github.com/RADAR-base/radar-helm-charts/pull/6202) - Helm chart for deploying Apache NiFi in the RADAR-base Kubernetes environment.
