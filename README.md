@@ -30,6 +30,7 @@ All merged RFCs live in `rfcs/`. Add an entry to the table below in your PR.
 | Number | Title | Status | Author | Link |
 |--------|-------|--------|--------|------|
 | 0001 | Sample RFC – Example Structure and Content | Draft | RADAR-base Team | rfcs/0001-sample-rfc.md |
+| 0002 | Just In Time Interventions Platform | Draft | RADAR-base Team | rfcs/platform.0002-just-in-time-intervention-platform.md |
 
 Governance
 ----------
