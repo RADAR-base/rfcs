@@ -1,21 +1,37 @@
 # Auto-label PRs based on changed file paths
 rfc:
-  - rfcs/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - rfcs/**
 meta:
-  - .github/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
 docs:
-  - rfcs/media/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - rfcs/media/**
 "area: platform":
-  - rfcs/platform/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - rfcs/platform/**
 "area: backend":
-  - rfcs/backend/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - rfcs/backend/**
 "area: mobile":
-  - rfcs/mobile/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - rfcs/mobile/**
 
 "area: data-analytics":
-  - rfcs/data-analytics/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - rfcs/data-analytics/**
 
 "area: general":
-  - rfcs/general/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - rfcs/general/**
 
 
