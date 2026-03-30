@@ -9,55 +9,55 @@
   color: a371f7
   description: Early discussion before an RFC is drafted
 
-- name: status: draft
+- name: "status: draft"
   color: cccccc
   description: RFC is in draft and under review
 
-- name: status: accepted
+- name: "status: accepted"
   color: 0e8a16
   description: RFC accepted for implementation
 
-- name: status: rejected
+- name: "status: rejected"
   color: b60205
   description: RFC rejected; see rationale in the PR
 
-- name: status: implemented
+- name: "status: implemented"
   color: 2cbe4e
   description: RFC has been implemented in code
 
-- name: status: superseded
+- name: "status: superseded"
   color: fbca04
   description: RFC superseded by a later RFC
 
-- name: area: platform
+- name: "area: platform"
   color: 0052cc
   description: Platform-wide concerns, infra, deployment
 
-- name: area: backend
+- name: "area: backend"
   color: 5319e7
   description: Server-side services and APIs
 
-- name: area: mobile
+- name: "area: mobile"
   color: d93f0b
   description: Mobile apps and SDKs
 
-- name: area: data-analytics
+- name: "area: data-analytics"
   color: 0e8a16
   description: Data pipelines, warehousing, BI, metrics, experimentation
 
-- name: area: general
+- name: "area: general"
   color: 1f6feb
   description: Cross-cutting or domain-agnostic RFCs
 
-- name: area: privacy
+- name: "area: privacy"
   color: 0b8769
   description: Security, privacy, compliance
 
-- name: type: design
+- name: "type: design"
   color: 1d76db
   description: Architectural or design-focused
 
-- name: type: process
+- name: "type: process"
   color: 6f42c1
   description: Process and governance changes
 
