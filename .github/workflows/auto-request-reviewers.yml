@@ -26,7 +26,7 @@ jobs:
               - 'rfcs/mobile/**'
       - name: Request reviewers
         if: steps.detect.outputs.platform == 'true' || steps.detect.outputs.backend == 'true' || steps.detect.outputs.mobile == 'true'
-        uses: kentaro-m/auto-assign-action@v2
+        uses: kentaro-m/auto-assign-action@v2.0.2
         with:
           configuration-path: .github/auto-assign.yml
 
