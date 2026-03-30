@@ -8,6 +8,7 @@ jobs:
   check-area-label:
     permissions:
       pull-requests: read
+      issues: write
     runs-on: ubuntu-latest
     steps:
       - name: Check area label present
