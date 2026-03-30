@@ -31,6 +31,7 @@ All merged RFCs live in `rfcs/`. Add an entry to the table below in your PR.
 |--------|-------|--------|--------|------|
 | 0001 | Sample RFC – Example Structure and Content | Draft | RADAR-base Team | rfcs/0001-sample-rfc.md |
 | 0003 | Kotlin Data Mapper Library for RADAR-base Export Conversion | Draft | Yatharth Ranjan | rfcs/backend/0003-radar-data-mapper-kotlin.md |
+| 0004 | Streaming RADAR-base Data to Apache Iceberg on S3 | Draft | Yatharth Ranjan | rfcs/platform/0004-streaming-radar-kafka-to-iceberg-s3.md |
 
 Governance
 ----------
