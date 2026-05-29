@@ -251,3 +251,4 @@ References
 - k8sgpt Helm repo (for `helm repo add k8sgpt https://charts.k8sgpt.ai/`): https://charts.k8sgpt.ai/index.yaml
 - k8sgpt documentation: https://docs.k8sgpt.ai
 - Kubernetes Operator pattern: https://kubernetes.io/docs/concepts/extend-kubernetes/operator/
+
