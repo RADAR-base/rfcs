@@ -30,8 +30,7 @@ Non-Goals
 ---------
 - This RFC does not replace existing Prometheus, Grafana, or alerting infrastructure. k8sgpt augments, not replaces, those systems.
 - This RFC does not propose automated remediation or any automated cluster mutations triggered by LLM output.
-- Multi-cluster federation or Cluster API integration is out of scope for the initial rollout (but noted as a future extension).
-- Choosing or procuring an LLM provider contract is out of scope; this RFC assumes a provider decision is made separately and credentials are available.
+- Monitoring across multiple EKS clusters simultaneously is out of scope for this rollout; this RFC covers a single EKS cluster deployment only.
 
 Guide-level explanation
 -----------------------
@@ -121,9 +120,7 @@ ClusterRole / ClusterRoleBinding
 
 | Backend | Auth mechanism | Notes |
 |---------|---------------|-------|
-| Amazon Bedrock | IRSA (IAM Role for Service Account) | **Preferred** — no static credentials, native AWS IAM |
-| OpenAI | Kubernetes Secret (api-key) | Fallback; gpt-4o recommended |
-| LocalAI | Endpoint URL only | Air-gapped / no-egress option |
+| Amazon Bedrock | IRSA (IAM Role for Service Account) | No static credentials needed — auth via native AWS IAM |
 
 ### Analyzers (configurable)
 
@@ -154,9 +151,9 @@ Compatibility and migration
 
 Alternatives considered
 -----------------------
-**Prometheus + manual runbooks:** Already in place. Surfaces metrics but provides no language-level diagnostic context. Retained as the primary metrics layer; k8sgpt is complementary.
+**Prometheus + manual investigation:** Already in place. Surfaces metrics but provides no language-level diagnostic context. Retained as the primary metrics layer; k8sgpt is complementary.
 
-**Komodor / other commercial AIOps platforms:** Vendor lock-in, licensing cost, and data-egress concerns for a platform that sees all cluster events. k8sgpt is open-source and the only data sent externally is sanitized diagnostic text to the configured LLM API.
+**Komodor / other commercial AIOps platforms:** Vendor lock-in, licensing cost, and data-egress concerns for a platform that sees all cluster events. k8sgpt is open-source and with Amazon Bedrock all diagnostic data stays within the AWS network.
 
 **Custom in-house LLM integration:** Building a bespoke solution around the Kubernetes API + an LLM would replicate what k8sgpt already provides (analyzer logic, deduplication, CRD schema, sink integrations) at significant engineering cost with no differentiation.
 
@@ -189,16 +186,13 @@ k8sgpt only calls the LLM when a `Result` is first created or its content change
 
 | Model | Stable cluster (~5K tokens/day) | Active cluster (~50K tokens/day) |
 |-------|----------------------------------|----------------------------------|
-| OpenAI gpt-4o | ~$0.05/day (~$1.50/month) | ~$0.20/day (~$6/month) |
 | Bedrock Claude Haiku | ~$0.005/day (~$0.15/month) | ~$0.05/day (~$1.50/month) |
 | Bedrock Claude Sonnet | ~$0.03/day (~$1/month) | ~$0.33/day (~$10/month) |
-| Log analyzer enabled | Unpredictable — significantly higher across all models; not recommended initially | |
+| Log analyzer enabled | Unpredictable — significantly higher; not recommended initially | |
 
 _Bedrock pricing based on on-demand rates as of 2026. Actual cost depends on anomaly volume and output length._
 
-For a typical cluster, daily LLM spend is in the order of cents. Costs spike only when there are many simultaneous new issues or if the Log analyzer is enabled. A cloud spend budget alert on the LLM API account is recommended once a backend is chosen.
-
-**Decision required:** LLM backend selection and any associated spend approval needs sign-off from the team and manager before production rollout. See Open questions.
+For a typical cluster, daily LLM spend is in the order of cents. Costs spike only when there are many simultaneous new issues or if the Log analyzer is enabled. Model selection (Haiku vs Sonnet) and spend approval require manager and team sign-off before production rollout.
 
 Security and privacy
 --------------------
@@ -206,12 +200,12 @@ Security and privacy
 k8sgpt sends resource metadata and error messages (e.g., pod names, container statuses, event messages) to the configured LLM API. It does **not** send pod environment variables, secret values, or volume contents. Sensitive field scrubbing is enabled by default and configurable.
 
 **Threat model:**
-- *Credential exposure:* LLM API keys are stored in Kubernetes Secrets, not in the `K8sGPT` CR spec. Ensure RBAC restricts Secret read access to the k8sgpt service account only.
+- *Credential exposure:* Amazon Bedrock with IRSA requires no static API keys — credentials are handled via IAM role federation. Ensure the IAM role is scoped to `bedrock:InvokeModel` only and the IRSA annotation is set on the k8sgpt `ServiceAccount`.
 - *RBAC scope:* The k8sgpt service account requires cluster-wide read access to analyzed resources. Apply least-privilege: grant only `get`, `list`, `watch` on required resource groups; no write permissions.
 - *Network egress:* LLM API calls require outbound HTTPS to the Bedrock endpoint (`bedrock-runtime.<region>.amazonaws.com`). On EKS, control this via VPC Security Groups or AWS Network Firewall rather than Kubernetes NetworkPolicy. Using Bedrock keeps all traffic within the AWS network via VPC endpoints, avoiding public internet egress entirely.
 - *Result data:* `Result` CRs are stored in the cluster and contain LLM-generated text. Treat them as internal operational data subject to the same access controls as other cluster resources.
 
-**Compliance:** If cluster resource names or error strings are considered sensitive under applicable data regulations, can use Amazon Bedrock (data stays within AWS) or LocalAI for fully air-gapped operation.
+**Compliance:** Amazon Bedrock keeps all data within AWS — no data leaves the AWS network, which satisfies data-residency requirements.
 
 Testing strategy
 ----------------
@@ -236,19 +230,17 @@ Testing strategy
 
 Open questions
 --------------
-- **LLM backend selection:** Amazon Bedrock (via IRSA, no extra credentials) vs. OpenAI (simpler setup, external egress) — decision needed before production rollout. Bedrock is preferred given existing AWS infrastructure.
-- **LLM spend approval:** Estimated cost is low (cents/day for a stable cluster) but requires manager and team sign-off before committing to a backend. See cost model in Operational considerations.
-- **Analysis interval tuning:** `2m` is a starting point; production load and token cost may require adjustment. A cloud spend budget alert on the LLM API account is recommended once a backend is chosen.
+- **Model selection and spend approval:** Amazon Bedrock is the chosen backend. Decision needed on Claude Haiku vs. Claude Sonnet (see cost model in Operational considerations) with manager and team sign-off before production rollout. A Bedrock spend budget alert in AWS Cost Explorer is recommended.
+- **Analysis interval tuning:** `2m` is a starting point; production load and token usage may require adjustment after the staging validation week.
 - **Slack channel strategy:** Dedicated `#k8sgpt-findings` channel vs. routing to existing `#cluster-alerts`? High-volume findings may warrant a separate channel with digest/summarization.
 - **Multi-cluster scope:** Do we want to evaluate monitoring across multiple EKS clusters (via remote kubeconfig injection) in a follow-up RFC once the single-cluster rollout stabilizes?
-- **Log analyzer:** Enabling the `Log` analyzer increases LLM token consumption significantly. Should it be enabled selectively per namespace or only on demand?
 
 References
 ----------
 - k8sgpt-operator GitHub: https://github.com/k8sgpt-ai/k8sgpt-operator
 - k8sgpt CLI GitHub: https://github.com/k8sgpt-ai/k8sgpt
-- k8sgpt Helm chart (ArtifactHub): https://artifacthub.io/packages/helm/k8sgpt-operator/k8sgpt-operator
-- k8sgpt Helm repo (for `helm repo add k8sgpt https://charts.k8sgpt.ai/`): https://charts.k8sgpt.ai/index.yaml
+- k8sgpt Helm chart (GitHub): https://github.com/k8sgpt-ai/k8sgpt-operator/tree/main/chart
+- k8sgpt Helm repo: `helm repo add k8sgpt https://charts.k8sgpt.ai/ && helm repo update`
 - k8sgpt documentation: https://docs.k8sgpt.ai
 - Kubernetes Operator pattern: https://kubernetes.io/docs/concepts/extend-kubernetes/operator/
 
