@@ -14,7 +14,7 @@ This RFC proposes adopting the [k8sgpt-operator](https://github.com/k8sgpt-ai/k8
 
 Motivation
 ----------
-Current cluster monitoring surfaces raw metrics and alerts but leaves root-cause analysis to engineers who must manually correlate events across pods, nodes, and control-plane components — often without dedicated capacity for cluster operations. This creates:
+Current cluster monitoring surfaces raw metrics and alerts but leaves root-cause analysis to engineers who must manually correlate events across pods, nodes, and workload-level resources — often without dedicated capacity for cluster operations. We run on AWS EKS where the Kubernetes control plane is fully managed by AWS; our operational scope covers workloads, nodes, namespaces, and AWS-integrated resources (ALB, EBS, IAM). This creates:
 
 - **High mean-time-to-diagnose (MTTD):** Engineers context-switching from feature work spend significant time interpreting `CrashLoopBackOff`, OOM kills, pending pods, and misconfigured services before acting.
 - **Alert fatigue:** Metric thresholds fire without actionable context, and with no dedicated ops rotation, alerts are easily missed or deprioritised.
@@ -48,11 +48,9 @@ metadata:
 spec:
   ai:
     enabled: true
-    model: gpt-4o
-    backend: openai
-    secret:
-      name: k8sgpt-ai-secret
-      key: api-key
+    model: anthropic.claude-3-haiku-20240307-v1:0  # Claude Haiku via Bedrock
+    backend: amazonbedrock
+    region: us-west-2  # match your EKS cluster region
   noCache: false
   filters:
     - Pod
@@ -65,6 +63,8 @@ spec:
     webhook: https://hooks.slack.com/services/...  # stored in a secret in practice
   interval: 2m
 ```
+
+> **Auth note:** No API key secret is needed for Amazon Bedrock. Auth is handled via IRSA — the k8sgpt `ServiceAccount` is annotated with the IAM role ARN that has `bedrock:InvokeModel` permission.
 
 > **How `interval` works:** `interval: 2m` means k8sgpt scans the cluster every 2 minutes. A sink notification (e.g. Slack) is only sent when a `Result` is **first created** or when its content **changes** — not on every scan. A persistently broken pod will generate one alert, not one every 2 minutes.
 
@@ -150,7 +150,7 @@ Compatibility and migration
 - This is a net-new addition with no impact on existing resources or APIs.
 - The operator and k8sgpt workload run in a dedicated namespace (`k8sgpt-operator-system`) isolated from application workloads.
 - Removal is clean: `helm uninstall` removes the operator, the managed deployment, and both CRDs (and therefore all `Result` objects). No cluster state is mutated by the operator beyond its own namespace.
-- Future: if adopting multi-cluster analysis (Cluster API), a separate RFC will cover kubeconfig injection and seed-cluster topology.
+- Future: if adopting multi-cluster analysis across multiple EKS clusters, a separate RFC will cover kubeconfig injection and cross-cluster topology.
 
 Alternatives considered
 -----------------------
@@ -208,7 +208,7 @@ k8sgpt sends resource metadata and error messages (e.g., pod names, container st
 **Threat model:**
 - *Credential exposure:* LLM API keys are stored in Kubernetes Secrets, not in the `K8sGPT` CR spec. Ensure RBAC restricts Secret read access to the k8sgpt service account only.
 - *RBAC scope:* The k8sgpt service account requires cluster-wide read access to analyzed resources. Apply least-privilege: grant only `get`, `list`, `watch` on required resource groups; no write permissions.
-- *Network egress:* LLM API calls require outbound HTTPS to the provider endpoint. Ensure NetworkPolicy or egress firewall rules permit only that destination. Consider LocalAI backend for air-gapped environments.
+- *Network egress:* LLM API calls require outbound HTTPS to the Bedrock endpoint (`bedrock-runtime.<region>.amazonaws.com`). On EKS, control this via VPC Security Groups or AWS Network Firewall rather than Kubernetes NetworkPolicy. Using Bedrock keeps all traffic within the AWS network via VPC endpoints, avoiding public internet egress entirely.
 - *Result data:* `Result` CRs are stored in the cluster and contain LLM-generated text. Treat them as internal operational data subject to the same access controls as other cluster resources.
 
 **Compliance:** If cluster resource names or error strings are considered sensitive under applicable data regulations, can use Amazon Bedrock (data stays within AWS) or LocalAI for fully air-gapped operation.
@@ -240,7 +240,7 @@ Open questions
 - **LLM spend approval:** Estimated cost is low (cents/day for a stable cluster) but requires manager and team sign-off before committing to a backend. See cost model in Operational considerations.
 - **Analysis interval tuning:** `2m` is a starting point; production load and token cost may require adjustment. A cloud spend budget alert on the LLM API account is recommended once a backend is chosen.
 - **Slack channel strategy:** Dedicated `#k8sgpt-findings` channel vs. routing to existing `#cluster-alerts`? High-volume findings may warrant a separate channel with digest/summarization.
-- **Multi-cluster scope:** Do we want to evaluate the multi-cluster (Cluster API / remote kubeconfig) feature in a follow-up RFC once the single-cluster rollout stabilizes?
+- **Multi-cluster scope:** Do we want to evaluate monitoring across multiple EKS clusters (via remote kubeconfig injection) in a follow-up RFC once the single-cluster rollout stabilizes?
 - **Log analyzer:** Enabling the `Log` analyzer increases LLM token consumption significantly. Should it be enabled selectively per namespace or only on demand?
 
 References
