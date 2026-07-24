@@ -223,7 +223,7 @@ Operational considerations
 6. Repeat step-by-step for remaining services. Only after all are migrated, plan NGINX Ingress removal (separate RFC/PR).
 7. Promote the same flow to production once stage is stable.
 
-**Resource footprint (NGF):** one controller Deployment plus per-Gateway nginx data-plane pods; sizeable but comparable to the existing ingress controller. The NGF chart ships `resources: {}` (unset) for both planes, so we set our own. Baseline reference: the current nginx-ingress controller runs `requests: cpu 100m / memory 90Mi` with **no limits** (a deliberate choice — CPU limits on an ingress data plane cause request-latency throttling). Proposed initial values on stage:
+**Resource footprint (NGF):** one controller Deployment plus per-Gateway nginx data-plane pods; sizeable but comparable to the existing ingress controller. The NGF chart ships `resources: {}` (unset) for both planes, so we set our own. Baseline reference: the upstream ingress-nginx chart defaults its controller to `requests: cpu 100m / memory 90Mi` with **no limits** (a deliberate choice — CPU limits on an ingress data plane cause request-latency throttling). Proposed initial values on stage:
 
 | Plane | requests | limits |
 |-------|----------|--------|
