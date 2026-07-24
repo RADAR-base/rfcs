@@ -57,7 +57,7 @@ flowchart TB
       subgraph live["Live path — nginx-ingress, serving today"]
         direction TB
         nlbL["AWS NLB · LIVE<br/>eipalloc-xxxx · subnet-xxxx"]
-        ctlL["ingress-nginx controller<br/>replicas 1 · nodeSelector role=dmz<br/>ssl-redirect · CORS · 24m body · rewrite-target"]
+        ctlL["ingress-nginx controller<br/>replicas 1 · nodeSelector role=dmz<br/>ssl-redirect · CORS · body-size · rewrite-target"]
         ingL["Ingress · ingressClassName nginx<br/>10 live objects · path /kafka/?(.*) → radar-gateway<br/>tls radar-base-tls · cert-manager letsencrypt-prod"]
         nlbL --> ctlL --> ingL
       end
@@ -186,7 +186,7 @@ Today's routing behaviour is encoded in `nginx.ingress.kubernetes.io/*` annotati
 | Basic auth (`auth-type`/`auth-secret`) | `SnippetsFilter` or external auth | ⚠️ NGF-specific |
 | **Rate limiting** | `SnippetsFilter` (`limit_req`) — **not configured on any service today**, nothing to port | ⚠️ NGF-specific when needed |
 
-The common cases (redirect, rewrite, header manipulation, body size) are covered by core filters plus one NGF policy. The long tail (raw snippets, CORS preflight, session affinity, basic auth) relies on NGF's `SnippetsFilter`, which is NGF-specific and slightly dents the cross-implementation portability the migration targets — that trade-off is scoped per service before its cutover, not globally. `radar-gateway` (first service) needs `URLRewrite` (`/kafka/$1`), CORS headers, a 24m `ClientSettingsPolicy`, and one small snippet.
+The common cases (redirect, rewrite, header manipulation, body size) are covered by core filters plus one NGF policy. The long tail (raw snippets, CORS preflight, session affinity, basic auth) relies on NGF's `SnippetsFilter`, which is NGF-specific and slightly dents the cross-implementation portability the migration targets — that trade-off is scoped per service before its cutover, not globally. `radar-gateway` (first service) needs a `URLRewrite` filter, CORS headers, a body-size `ClientSettingsPolicy`, and one small snippet.
 
 ### Failure modes
 - **Controller down:** only migrated hostnames (pointed at the Gateway NLB) are affected. Legacy hostnames on NGINX Ingress are unaffected — the two data planes share nothing.
