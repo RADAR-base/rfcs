@@ -47,9 +47,12 @@ metadata:
 spec:
   ai:
     enabled: true
-    model: anthropic.claude-3-haiku-20240307-v1:0  # Claude Haiku via Bedrock
-    backend: amazonbedrock
-    region: us-west-2  # match your EKS cluster region
+    backend: openai                          # OpenAI-compatible API (LiteLLM gateway)
+    baseUrl: https://<litellm-endpoint>/v1   # LiteLLM proxy on CREATE
+    model: <model-served-by-litellm>         # self-hosted vLLM model, or a Bedrock route
+    secret:                                  # LiteLLM virtual key
+      name: litellm-api-key
+      key: api-key
   noCache: false
   filters:
     - Pod
@@ -60,12 +63,18 @@ spec:
   sink:
     type: slack
     webhook: https://hooks.slack.com/services/...  # stored in a secret in practice
-  interval: 2m
+  interval: 5m
 ```
 
-> **Auth note:** No API key secret is needed for Amazon Bedrock. Auth is handled via IRSA — the k8sgpt `ServiceAccount` is annotated with the IAM role ARN that has `bedrock:InvokeModel` permission.
+> **Auth note:** k8sgpt authenticates to the LiteLLM gateway with a **virtual API key** stored as a Kubernetes Secret (referenced via `spec.ai.secret`). LiteLLM holds all downstream credentials — it routes to the self-hosted vLLM model on CREATE, and can route to Amazon Bedrock (via IRSA on the LiteLLM side) if a Claude model is needed. This centralizes provider credentials in the gateway rather than in k8sgpt.
 
-> **How `interval` works:** `interval: 2m` means k8sgpt scans the cluster every 2 minutes. A sink notification (e.g. Slack) is only sent when a `Result` is **first created** or when its content **changes** — not on every scan. A persistently broken pod will generate one alert, not one every 2 minutes.
+> **Prerequisites (LiteLLM gateway):** This integration is opt-in and requires setup before the `K8sGPT` CR will function:
+> 1. **Reachable endpoint:** The LiteLLM proxy on CREATE must be reachable from the EKS cluster over HTTPS (it is currently internet-exposed). Confirm the cluster's egress can reach it.
+> 2. **Model availability:** The `model` named in the CR must be served by LiteLLM — either the self-hosted vLLM model, or a configured Bedrock route.
+> 3. **Virtual key:** Create a LiteLLM virtual key scoped to k8sgpt and store it as a Kubernetes Secret referenced by `spec.ai.secret`. Rate-limit the key at the gateway.
+> 4. **Bedrock (optional):** If LiteLLM routes to Bedrock, wire IRSA/credentials scoped to `bedrock:InvokeModel` on the **LiteLLM** side — not on k8sgpt.
+
+> **How `interval` works:** `interval: 5m` means k8sgpt scans the cluster every 5 minutes. A sink notification (e.g. Slack) is only sent when a `Result` is **first created** or when its content **changes** — not on every scan. A persistently broken pod will generate one alert, not one every 5 minutes.
 
 **Result** – a read-only resource written by the operator. Each finding becomes a `Result` object:
 
@@ -111,8 +120,8 @@ ClusterRole / ClusterRoleBinding
 
 1. Admin applies a `K8sGPT` CR.
 2. The operator controller reconciles the CR: creates the k8sgpt `Deployment`, `ServiceAccount`, and secret mounts.
-3. The k8sgpt workload runs its analyzer loop at the configured interval (default `30s`, recommended `2m` for production).
-4. For each anomaly detected, k8sgpt sends the raw diagnostic to the LLM backend over HTTPS.
+3. The k8sgpt workload runs its analyzer loop at the configured interval (default `30s`, recommended `5m` for production).
+4. For each anomaly detected, k8sgpt sends the raw diagnostic over HTTPS to the LiteLLM gateway, which routes to the configured model (self-hosted vLLM, or Bedrock if configured).
 5. The LLM response is stored as a `Result` CR and (if configured) forwarded to the sink.
 6. Stale `Result` objects are garbage-collected when the underlying issue resolves.
 
@@ -120,7 +129,8 @@ ClusterRole / ClusterRoleBinding
 
 | Backend | Auth mechanism | Notes |
 |---------|---------------|-------|
-| Amazon Bedrock | IRSA (IAM Role for Service Account) | No static credentials needed — auth via native AWS IAM |
+| LiteLLM gateway (OpenAI-compatible) | Virtual API key (K8s Secret) | **Primary.** Single gateway on CREATE; routes to the self-hosted vLLM model and centralizes keys, model routing, rate limits, and cost tracking |
+| Amazon Bedrock (via LiteLLM) | IRSA on the LiteLLM side | **Optional** downstream route for Claude models (e.g. Sonnet) when higher capability is needed |
 
 ### Analyzers (configurable)
 
@@ -147,13 +157,13 @@ Compatibility and migration
 - This is a net-new addition with no impact on existing resources or APIs.
 - The operator and k8sgpt workload run in a dedicated namespace (`k8sgpt-operator-system`) isolated from application workloads.
 - Removal is clean: `helm uninstall` removes the operator, the managed deployment, and both CRDs (and therefore all `Result` objects). No cluster state is mutated by the operator beyond its own namespace.
-- Future: if adopting multi-cluster analysis across multiple EKS clusters, a separate RFC will cover kubeconfig injection and cross-cluster topology.
+- Scaling to more clusters: Each EKS cluster deploys its own independent k8sgpt operator (the standard pattern) — there is no central multi-cluster controller or remote kubeconfig injection. Adding a cluster means installing the operator there, not extending this deployment.
 
 Alternatives considered
 -----------------------
 **Prometheus + manual investigation:** Already in place. Surfaces metrics but provides no language-level diagnostic context. Retained as the primary metrics layer; k8sgpt is complementary.
 
-**Komodor / other commercial AIOps platforms:** Vendor lock-in, licensing cost, and data-egress concerns for a platform that sees all cluster events. k8sgpt is open-source and with Amazon Bedrock all diagnostic data stays within the AWS network.
+**Komodor / other commercial AIOps platforms:** Vendor lock-in, licensing cost, and data-egress concerns for a platform that sees all cluster events. k8sgpt is open-source, and routing through our own LiteLLM/vLLM gateway keeps diagnostic data on infrastructure we control rather than sending it to a third-party AIOps vendor.
 
 **Custom in-house LLM integration:** Building a bespoke solution around the Kubernetes API + an LLM would replicate what k8sgpt already provides (analyzer logic, deduplication, CRD schema, sink integrations) at significant engineering cost with no differentiation.
 
@@ -162,7 +172,7 @@ Alternatives considered
 Operational considerations
 --------------------------
 **Rollout plan:**
-1. Deploy on Stage (non-production) cluster first. Validate `Result` quality and token usage over one week.
+1. Deploy on Stage (non-production) cluster first. Validate `Result` quality and gateway/model behavior (latency, request volume) over one week.
 2. Tune the analyzer filter list and interval to match observed noise levels.
 3. Enable Slack sink in `#cluster-alerts` (or a dedicated `#k8sgpt-findings`) channel.
 4. Promote to production with conservative interval (`5m`) and no `Log` analyzer initially.
@@ -182,30 +192,34 @@ Operational considerations
 **Feature flags:** Analysis scope is controlled declaratively via the `filters` list in the `K8sGPT` CR — no code changes required to enable/disable analyzers.
 
 **LLM cost model:**
-k8sgpt only calls the LLM when a `Result` is first created or its content changes — not on every scan. A persistently broken resource is queried once, not repeatedly. This keeps costs low for stable clusters.
+k8sgpt only calls the model when a `Result` is first created or its content changes — not on every scan. A persistently broken resource is queried once, not repeatedly. This keeps request volume low.
 
-| Model | Stable cluster (~5K tokens/day) | Active cluster (~50K tokens/day) |
+Because the primary model is **self-hosted on vLLM (CREATE)**, per-request inference has no marginal token cost — the cost is the fixed GPU-node capacity (shared infrastructure, not attributable per-scan). The only AWS-side cost is **public-internet egress** for the request/response payloads (resource metadata + error text, a few KB per finding, edge-triggered) — on the order of **cents/month** at expected volume.
+
+If LiteLLM is configured to route to **Amazon Bedrock** for higher-capability analysis, per-token pricing applies for that path:
+
+| Model (via Bedrock route) | Stable cluster (~5K tokens/day) | Active cluster (~50K tokens/day) |
 |-------|----------------------------------|----------------------------------|
-| Bedrock Claude Haiku | ~$0.005/day (~$0.15/month) | ~$0.05/day (~$1.50/month) |
-| Bedrock Claude Sonnet | ~$0.03/day (~$1/month) | ~$0.33/day (~$10/month) |
+| Claude Haiku | ~$0.005/day (~$0.15/month) | ~$0.05/day (~$1.50/month) |
+| Claude Sonnet | ~$0.03/day (~$1/month) | ~$0.33/day (~$10/month) |
 | Log analyzer enabled | Unpredictable — significantly higher; not recommended initially | |
 
 _Bedrock pricing based on on-demand rates as of 2026. Actual cost depends on anomaly volume and output length._
 
-For a typical cluster, daily LLM spend is in the order of cents. Costs spike only when there are many simultaneous new issues or if the Log analyzer is enabled. Model selection (Haiku vs Sonnet) and spend approval require manager and team sign-off before production rollout.
+For a typical cluster, spend is negligible on the self-hosted path (egress only) and in the order of cents/day if routed to Bedrock. Costs spike only when there are many simultaneous new issues or if the Log analyzer is enabled. Model selection (self-hosted vLLM vs. Bedrock Claude Sonnet) and any Bedrock spend approval require manager and team sign-off before production rollout.
 
 Security and privacy
 --------------------
-**Data sent to the LLM:**
-k8sgpt sends resource metadata and error messages (e.g., pod names, container statuses, event messages) to the configured LLM API. It does **not** send pod environment variables, secret values, or volume contents. Sensitive field scrubbing is enabled by default and configurable.
+**Data sent to the model:**
+k8sgpt sends resource metadata and error messages (e.g., pod names, container statuses, event messages) to the configured model via the LiteLLM gateway. It does **not** send pod environment variables, secret values, or volume contents. Sensitive field scrubbing is enabled by default and configurable.
 
 **Threat model:**
-- *Credential exposure:* Amazon Bedrock with IRSA requires no static API keys — credentials are handled via IAM role federation. Ensure the IAM role is scoped to `bedrock:InvokeModel` only and the IRSA annotation is set on the k8sgpt `ServiceAccount`.
+- *Credential exposure:* k8sgpt holds only a LiteLLM **virtual key** (a Kubernetes Secret), not provider credentials. Downstream credentials (e.g. Bedrock IAM) live on the LiteLLM gateway. Rotate and rate-limit the virtual key at the gateway, and scope it to k8sgpt only.
 - *RBAC scope:* The k8sgpt service account requires cluster-wide read access to analyzed resources. Apply least-privilege: grant only `get`, `list`, `watch` on required resource groups; no write permissions.
-- *Network egress:* LLM API calls require outbound HTTPS to the Bedrock endpoint (`bedrock-runtime.<region>.amazonaws.com`). On EKS, control this via VPC Security Groups or AWS Network Firewall rather than Kubernetes NetworkPolicy. Using Bedrock keeps all traffic within the AWS network via VPC endpoints, avoiding public internet egress entirely.
+- *Network egress:* The LiteLLM/vLLM endpoint on CREATE is **internet-exposed**, so k8sgpt makes outbound HTTPS calls over the **public internet** (not intra-AWS). This traffic must be TLS-encrypted and authenticated with the virtual key, and the gateway should be **IP-allowlisted** to the EKS cluster's egress addresses (e.g. NAT gateway EIPs). Control cluster egress via VPC Security Groups / AWS Network Firewall.
 - *Result data:* `Result` CRs are stored in the cluster and contain LLM-generated text. Treat them as internal operational data subject to the same access controls as other cluster resources.
 
-**Compliance:** Amazon Bedrock keeps all data within AWS — no data leaves the AWS network, which satisfies data-residency requirements.
+**Compliance:** Diagnostic data is sent to our **own self-hosted model** (vLLM on CREATE), not a third-party LLM provider — so no cluster data is shared with an external AI vendor. Note, however, that the data **leaves AWS and traverses the public internet** to reach CREATE; it does not stay within the AWS network. Confirm this cross-environment path (AWS EKS → KCL CREATE) meets data-residency requirements, and keep the channel TLS-encrypted and access-controlled. If a Bedrock route is enabled, that subset of traffic stays within AWS.
 
 Testing strategy
 ----------------
@@ -230,10 +244,9 @@ Testing strategy
 
 Open questions
 --------------
-- **Model selection and spend approval:** Amazon Bedrock is the chosen backend. Decision needed on Claude Haiku vs. Claude Sonnet (see cost model in Operational considerations) with manager and team sign-off before production rollout. A Bedrock spend budget alert in AWS Cost Explorer is recommended.
-- **Analysis interval tuning:** `2m` is a starting point; production load and token usage may require adjustment after the staging validation week.
+- **Model selection and spend approval:** The primary backend is the LiteLLM gateway routing to the self-hosted vLLM model on CREATE. The team has flagged an expectation of **at least Sonnet-level capability** — note that Claude Sonnet itself is not self-hostable on vLLM, so we need to either confirm the vLLM-served model meets that capability bar, or configure LiteLLM to route k8sgpt to **Bedrock Claude Sonnet** (per-token cost applies; see cost model). Requires manager and team sign-off before production rollout; if Bedrock is used, a spend budget alert in AWS Cost Explorer is recommended.
+- **Analysis interval tuning:** `5m` is a starting point; production load and token usage may require adjustment after the staging validation week.
 - **Slack channel strategy:** Dedicated `#k8sgpt-findings` channel vs. routing to existing `#cluster-alerts`? High-volume findings may warrant a separate channel with digest/summarization.
-- **Multi-cluster scope:** Do we want to evaluate monitoring across multiple EKS clusters (via remote kubeconfig injection) in a follow-up RFC once the single-cluster rollout stabilizes?
 
 References
 ----------
@@ -242,5 +255,7 @@ References
 - k8sgpt Helm chart (GitHub): https://github.com/k8sgpt-ai/k8sgpt-operator/tree/main/chart
 - k8sgpt Helm repo: `helm repo add k8sgpt https://charts.k8sgpt.ai/ && helm repo update`
 - k8sgpt documentation: https://docs.k8sgpt.ai
+- LiteLLM proxy documentation: https://docs.litellm.ai
+- vLLM documentation: https://docs.vllm.ai
 - Kubernetes Operator pattern: https://kubernetes.io/docs/concepts/extend-kubernetes/operator/
 
