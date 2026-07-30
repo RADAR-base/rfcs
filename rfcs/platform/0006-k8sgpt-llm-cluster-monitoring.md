@@ -63,7 +63,8 @@ spec:
   sink:
     type: slack
     webhook: https://hooks.slack.com/services/...  # stored in a secret in practice
-  interval: 5m
+  analysis:
+    interval: 5m                                   # must match ^[0-9]+[smh]$
 ```
 
 > **Auth note:** k8sgpt authenticates to the LiteLLM gateway with a **virtual API key** stored as a Kubernetes Secret (referenced via `spec.ai.secret`). LiteLLM holds all downstream credentials — it routes to the self-hosted vLLM model on CREATE, and can route to Amazon Bedrock (via IRSA on the LiteLLM side) if a Claude model is needed. This centralizes provider credentials in the gateway rather than in k8sgpt.
@@ -74,7 +75,7 @@ spec:
 > 3. **Virtual key:** Create a LiteLLM virtual key scoped to k8sgpt and store it as a Kubernetes Secret referenced by `spec.ai.secret`. Rate-limit the key at the gateway.
 > 4. **Bedrock (optional):** If LiteLLM routes to Bedrock, wire IRSA/credentials scoped to `bedrock:InvokeModel` on the **LiteLLM** side — not on k8sgpt.
 
-> **How `interval` works:** `interval: 5m` means k8sgpt scans the cluster every 5 minutes. A sink notification (e.g. Slack) is only sent when a `Result` is **first created** or when its content **changes** — not on every scan. A persistently broken pod will generate one alert, not one every 5 minutes.
+> **How `interval` works:** `analysis.interval: 5m` means k8sgpt scans the cluster every 5 minutes. A sink notification (e.g. Slack) is only sent when a `Result` is **first created** or when its content **changes** — not on every scan. A persistently broken pod will generate one alert, not one every 5 minutes.
 
 **Result** – a read-only resource written by the operator. Each finding becomes a `Result` object:
 
