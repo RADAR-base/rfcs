@@ -45,6 +45,7 @@ metadata:
   name: k8sgpt
   namespace: k8sgpt-operator-system
 spec:
+  version: v0.4.36                           # pin the image tag (see Tuning & noise control)
   ai:
     enabled: true
     backend: openai                          # OpenAI-compatible API (LiteLLM gateway)
@@ -54,17 +55,19 @@ spec:
       name: litellm-api-key
       key: api-key
   noCache: false
-  filters:
+  # targetNamespace: <ns>                    # optional: scope to ONE namespace; omit = whole cluster
+  filters:                                   # start minimal; Pod is highest-signal
     - Pod
-    - Deployment
-    - Service
-    - HorizontalPodAutoscaler
-    - NetworkPolicy
+  resources:                                 # required — workload can OOM unbounded on large clusters
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 1Gi }
   sink:
     type: slack
-    webhook: https://hooks.slack.com/services/...  # stored in a secret in practice
+    secret:                                  # webhook URL stored in a Secret
+      name: slack-webhook
+      key: url
   analysis:
-    interval: 5m                                   # must match ^[0-9]+[smh]$
+    interval: 5m                             # must match ^[0-9]+[smh]$
 ```
 
 > **Auth note:** k8sgpt authenticates to the LiteLLM gateway with a **virtual API key** stored as a Kubernetes Secret (referenced via `spec.ai.secret`). LiteLLM holds all downstream credentials — it routes to the self-hosted vLLM model on CREATE, and can route to Amazon Bedrock (via IRSA on the LiteLLM side) if a Claude model is needed. This centralizes provider credentials in the gateway rather than in k8sgpt.
@@ -178,10 +181,12 @@ Operational considerations
 3. Enable Slack sink in `#cluster-alerts` (or a dedicated `#k8sgpt-findings`) channel.
 4. Promote to production with conservative interval (`5m`) and no `Log` analyzer initially.
 
+**Deployment model:** The Helm chart installs only the **operator and CRDs** — it does not create the `K8sGPT` CR (the config instance). That CR is applied separately and is not tracked in the Helm release, so a `helm upgrade` won't touch it. For production, manage the `K8sGPT` CR declaratively via GitOps (commit it to the deploy repo alongside the operator install) rather than a one-off `kubectl apply`, so config changes (filters, interval, model) are reviewed and version-controlled.
+
 **Resource footprint:**
 - Operator: ~50m CPU / 128Mi memory
-- k8sgpt workload: ~100m CPU / 256Mi memory (higher briefly during analysis runs)
-- Set resource requests and limits in the `K8sGPT` spec to enforce these.
+- k8sgpt workload: request ~100m CPU / 256Mi, limit 1Gi. Observed on a populated stage cluster with `filters: [Pod]` cluster-wide: ~1m CPU / ~25Mi steady-state (brief spikes during analysis). Memory scales with the number of analyzers × namespaces in scope.
+- Set resource requests and limits in the `K8sGPT` spec to enforce these — unbounded analysis can OOM the workload (see Tuning & noise control).
 
 **Observability of k8sgpt itself:**
 - Monitor the k8sgpt workload pod for restarts (`kube_pod_container_status_restarts_total`).
@@ -191,6 +196,14 @@ Operational considerations
 **Rollback:** Delete the `K8sGPT` CR to stop the workload. The operator is removed via `helm uninstall` with no residual impact on cluster workloads.
 
 **Feature flags:** Analysis scope is controlled declaratively via the `filters` list in the `K8sGPT` CR — no code changes required to enable/disable analyzers.
+
+**Tuning & noise control** (validated on stage):
+- **Pin `spec.version`.** The operator may default the k8sgpt image to an empty/invalid tag (`ghcr.io/k8sgpt-ai/k8sgpt:`), which produces `InvalidImageName` pods that flap on every reconcile — and each new pod name is itself self-reported as a finding. Always set an explicit version (e.g. `v0.4.36`).
+- **Start scoped, then widen.** `targetNamespace` limits analysis to a single namespace (it takes one value; omit it for the whole cluster — there is no multi-namespace or exclude list). Validate in one namespace before going cluster-wide.
+- **Start with `filters: [Pod]`.** Pod findings (CrashLoopBackOff, ImagePullBackOff, OOMKilled) are the highest-signal. The `Service` and `HorizontalPodAutoscaler` analyzers are the noisiest on a populated cluster — they fire on steady-state conditions (headless services with no endpoints, HPAs below min replicas) and can generate a large volume of low-value alerts on the first scan. Add analyzers deliberately, one at a time.
+- **Set `resources`.** Unbounded, the workload can be OOMKilled during cluster-wide analysis — which flaps the pod and adds self-noise. A `1Gi` limit is comfortable; observed steady-state is ~25Mi with `Pod`-only.
+- **Volatile-content findings re-alert.** The dedup hash includes the error text, so findings whose text embeds changing values (rotating ELB instance IDs, changing pod names) are treated as "changed" and re-sent each scan. For persistent-reminder semantics, use a downstream sink (Alertmanager `repeat_interval`) rather than expecting k8sgpt to dedupe them.
+- **Runtime vs. restart fields.** `filters`, `targetNamespace`, `analysis.interval`, `ai.*`, and `sink` take effect on the next scan without restarting the workload (they are applied per-analysis). `version`, `repository`, and `resources` change the Deployment and roll a new pod.
 
 **LLM cost model:**
 k8sgpt only calls the model when a `Result` is first created or its content changes — not on every scan. A persistently broken resource is queried once, not repeatedly. This keeps request volume low.
