@@ -144,9 +144,9 @@ Advanced (opt-in): `HorizontalPodAutoscaler`, `NetworkPolicy`, `Log` (streams co
 
 ### Caching
 
-k8sgpt deduplicates analysis results using a local cache keyed on resource identity + error hash. For persistent cache needs aligned with our AWS infrastructure, the operator supports:
-- Amazon S3 bucket (preferred — fits existing AWS setup)
-- Interplex (built-in k8sgpt cache format, no external dependency)
+k8sgpt deduplicates analysis results using a local cache keyed on resource identity + error hash. The default in-cluster cache is sufficient for a single-cluster deployment. A persistent remote cache exists mainly to avoid re-paying LLM cost across pod restarts — but since the primary model is self-hosted on vLLM with no per-token cost, that benefit is marginal, so we do **not** enable a remote cache initially. If persistence is ever needed, the operator supports:
+- Interplex (built-in k8sgpt cache format, no external dependency) — preferred
+- Amazon S3 bucket (adds an S3 dependency + IAM setup)
 
 ### Sinks
 
@@ -178,7 +178,7 @@ Operational considerations
 **Rollout plan:**
 1. Deploy on Stage (non-production) cluster first. Validate `Result` quality and gateway/model behavior (latency, request volume) over one week.
 2. Tune the analyzer filter list and interval to match observed noise levels.
-3. Enable Slack sink in `#cluster-alerts` (or a dedicated `#k8sgpt-findings`) channel.
+3. Enable the Slack sink to a **dedicated** `#k8sgpt-findings` channel (kept separate from existing alert channels to avoid noise).
 4. Promote to production with conservative interval (`5m`) and no `Log` analyzer initially.
 
 **Deployment model:** The Helm chart installs only the **operator and CRDs** — it does not create the `K8sGPT` CR (the config instance). That CR is applied separately and is not tracked in the Helm release, so a `helm upgrade` won't touch it. For production, manage the `K8sGPT` CR declaratively via GitOps (commit it to the deploy repo alongside the operator install) rather than a one-off `kubectl apply`, so config changes (filters, interval, model) are reviewed and version-controlled.
@@ -260,7 +260,6 @@ Open questions
 --------------
 - **Model selection and spend approval:** The primary backend is the LiteLLM gateway routing to the self-hosted vLLM model on CREATE. The team has flagged an expectation of **at least Sonnet-level capability** — note that Claude Sonnet itself is not self-hostable on vLLM, so we need to either confirm the vLLM-served model meets that capability bar, or configure LiteLLM to route k8sgpt to **Bedrock Claude Sonnet** (per-token cost applies; see cost model). Requires manager and team sign-off before production rollout; if Bedrock is used, a spend budget alert in AWS Cost Explorer is recommended.
 - **Analysis interval tuning:** `5m` is a starting point; production load and token usage may require adjustment after the staging validation week.
-- **Slack channel strategy:** Dedicated `#k8sgpt-findings` channel vs. routing to existing `#cluster-alerts`? High-volume findings may warrant a separate channel with digest/summarization.
 
 References
 ----------
