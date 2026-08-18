@@ -30,6 +30,7 @@ All merged RFCs live in `rfcs/`. Add an entry to the table below in your PR.
 | Number | Title | Status | Author | Link |
 |--------|-------|--------|--------|------|
 | 0001 | Sample RFC – Example Structure and Content | Draft | RADAR-base Team | rfcs/0001-sample-rfc.md |
+| 0008 | An Apache Iceberg Lakehouse for RADAR-base | Draft | Aditya (@this-Aditya) | rfcs/platform/0008-iceberg-lakehouse.md |
 
 Governance
 ----------
