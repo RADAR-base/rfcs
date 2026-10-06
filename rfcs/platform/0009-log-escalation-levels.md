@@ -10,20 +10,25 @@ Discussion: <pre-RFC issue to be opened>
 
 Summary
 -------
-RADAR-base backend services send every ERROR log line to Sentry. Most of those events are not application
-problems: a phone that loses its connection mid-upload, an expired token, invalid content, or a dependency that is
-briefly unavailable. On one deployment this used up the monthly Sentry budget in two days and buried the real
-errors. This RFC proposes a platform-wide policy: **ERROR is reserved for problems in the service itself** (bugs
+An ERROR in a RADAR-base backend service should tell a developer that the application has a problem. Today it
+doesn't: ERROR log lines, which are sent to Sentry, are dominated by events that are not application problems: a
+phone that loses its connection mid-upload, an expired token, invalid content, or a dependency that is briefly
+unavailable. Real application errors drown in them, so developers are poorly informed about the problems they
+should fix. This RFC proposes a platform-wide policy: **ERROR is reserved for problems in the service itself** (bugs
 and misconfiguration). Incorrect use is INFO, naturally occurring events are INFO or DEBUG, and dependency outages
 are WARN. It also proposes how to apply the policy, starting with the shared radar-jersey library and the
 RADAR-Gateway.
 
 Motivation
 ----------
-- **Cost.** Sentry is billed by event volume. One deployment exhausts its monthly quota in two days, after which
-  real errors are dropped too.
-- **Signal.** The Sentry board is meant for developers: every event should be something a developer has to look
-  at. Today the board is dominated by client faults and disconnects, so a genuine bug is easy to miss.
+- **ERRORs have lost their meaning.** The Sentry board is meant to inform developers: every event should be
+  something a developer has to look at. Today it is dominated by client faults, disconnects and dependency
+  outages, so a genuine bug is easy to miss, and developers learn to ignore the board. Logging ERROR for expected
+  events also hides *how* the application failed: a Kafka outage shows up as hundreds of identical "500" stack
+  traces instead of one clear message.
+- **Developers can't trust the level.** When an ERROR can be anything from a typo in a client request to a
+  bug, every event has to be investigated to find out which. A strict level policy makes the level itself
+  informative, in Sentry and in pod logs alike.
 - **Correct HTTP semantics.** The same misclassification also produces wrong status codes. For example, a
   schema-registry outage is returned to the mobile app as a 400 (client error), so the app may drop data it
   should retry.
@@ -47,8 +52,9 @@ An analysis of RADAR-Gateway 0.9.5 with radar-jersey 0.12.9 found the following.
 
 Measurable goals:
 - No ERROR events from client faults, client disconnects or dependency outages in the services that adopted the
-  policy.
-- Sentry volume of the affected deployment back within its monthly budget.
+  policy: every remaining Sentry issue points at a bug or a misconfiguration.
+- Each kind of failure is logged once, with a message that says what went wrong (no duplicate events, no
+  generic "500" for a known cause).
 - Dependency outages return 5xx (503/504) and client faults 4xx.
 
 Non-Goals
@@ -141,8 +147,8 @@ Compatibility and migration
 
 Alternatives considered
 -----------------------
-- **Raise the Sentry threshold or sample events.** It's cheap, but it drops real errors as well as the noise.
-  Rejected.
+- **Raise the Sentry threshold or sample events.** It's cheap, but it drops real errors as well as the noise,
+  which makes developers even less informed. Rejected.
 - **Filter events in Sentry (inbound filters / `beforeSend`).** This treats the symptom, needs maintenance per
   message pattern and keeps the wrong HTTP statuses. It's used only as a fallback for third-party loggers.
 - **Per-deployment log4j2 overrides.** Every deployer would have to repeat them, and they can't tell a disconnect
@@ -152,8 +158,9 @@ Alternatives considered
 
 Operational considerations
 --------------------------
-- Sentry volume is the primary metric. Compare event counts per service before and after the rollout on the
-  affected deployment.
+- Primary measure: the share of Sentry issues that turn out to be real application problems. Review the issues
+  per service before and after the rollout. A side effect is a much lower event volume, which also keeps
+  deployments within their Sentry quota (one deployment currently exhausts its monthly quota in two days).
 - Pod logs keep INFO and WARN lines, so operational visibility doesn't drop.
 - Rollback: deploy the previous image or chart version. The change has no persistent state.
 
