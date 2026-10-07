@@ -5,7 +5,7 @@ Author(s): Pim van Nierop (@pvannierop)
 Status: Draft
 Created: 2026-10-06
 Updated: 2026-10-07
-Discussion: <pre-RFC issue to be opened>
+Discussion: https://github.com/RADAR-base/rfcs/issues/9
 ---
 
 Summary
@@ -288,5 +288,6 @@ References
 ----------
 - RADAR-Gateway: https://github.com/RADAR-base/RADAR-Gateway
 - radar-jersey exception mappers: https://github.com/RADAR-base/radar-jersey (`org.radarbase.jersey.exception`)
-- Detailed per-site inventory of the gateway analysis: RADAR-Kubernetes
-  `.claude/skills/platform-escalation-level/proposals/radar-gateway.md`
+- Pre-RFC discussion: https://github.com/RADAR-base/rfcs/issues/9
+- A detailed per-site inventory of the gateway analysis (file:line, current and proposed level and status)
+  exists and will be published with the implementation PRs.
