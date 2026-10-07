@@ -68,6 +68,8 @@ Non-Goals
 - Alerting on dependency outages. That remains the job of the monitoring stack (Prometheus / Alertmanager).
 - Third-party components (Kafka, PostgreSQL, …): their logs don't go to RADAR-base's Sentry.
 - The mobile apps. They may benefit from the corrected status codes, but no app changes are proposed.
+- Automated enforcement in repositories that don't use the radar-commons Gradle convention plugin; they are
+  expected to be phased out or migrated.
 
 Guide-level explanation
 -----------------------
@@ -163,6 +165,48 @@ The same analysis is repeated per service, one at a time. Expected follow-ups so
 - **Gateway metrics.** The gateway has no application metrics endpoint yet. A counter of rejected oversized
   requests per topic and a request-size histogram need one; that is a separate change from the log levels.
 
+### Enforcement
+
+Without enforcement, new code will drift back. The checks below are layered from most to least effective. The
+automated ones (layers 2 and 3) cover **only Kotlin projects that use the radar-commons Gradle convention plugin**
+(`radarKotlin { }`). Other repositories are expected to be phased out.
+
+As of 2026-10-07 that covers radar-commons, radar-jersey, RADAR-Schemas, RADAR-Gateway, radar-app-config,
+radar-data-dashboard-backend, RADAR-Rest-Source-Auth, RADAR-REST-Connector, radar-output-restructure,
+radar-upload-source-connector and RADAR-Appserver (its Kotlin code only). It doesn't cover ManagementPortal,
+RADAR-RedcapIntegration, RADAR-PushEndpoint, RADAR-JDBC-Connector and kafka-connect-transform-keyvalue. A
+repository is covered as soon as it adopts the plugin.
+
+1. **By construction.** radar-jersey's mappers choose the level from the exception type and status, so services
+   throw and don't log. Typed exceptions make the less obvious categories explicit, e.g.
+   `HttpDependencyUnavailableException` (503, WARN) and `HttpPlatformLimitException` (413, ERROR, rule 8), next to
+   the `isClientDisconnect()` helper. Done right, most rules hold without anyone having to think about them.
+2. **Static checks in `./gradlew check`.** Every PR already runs `./gradlew check` in CI, and the radar-commons
+   convention plugin already adds ktlint to it. The plugin will also add [detekt](https://detekt.dev) with a
+   small custom RADAR-base rule set, published from radar-commons:
+   - `NoPrintStackTrace`: no `printStackTrace()`;
+   - `LogAndThrow`: no `logger.error(…)` in a `catch` block that then throws (rule 3);
+   - `ErrorLevelInExceptionMapper`: no `logger.error` in an `ExceptionMapper`/`WriterInterceptor` outside the
+     shared level selection;
+   - `BroadIOExceptionAsClientError`: no `catch (IOException)` that throws a 4xx HTTP exception (rules 1 and 2);
+   - `StackTraceBelowError`: no throwable passed to `warn`/`info` (rule 6).
+
+   A detekt *baseline* file per repository lists the existing violations, so only new code fails a PR. A
+   repository picks up the rules by bumping its radar-commons version; no per-repository CI changes are needed.
+   These checks catch mechanical patterns. Whether a failure is really a client fault still needs a reviewer.
+3. **Tests that fail on ERROR.** radar-jersey publishes a test fixture: a JUnit 5 extension that captures log
+   output and **fails the test when an ERROR is logged**, unless the test is annotated `@ExpectErrorLog`. Service
+   tests for client faults, disconnects and dependency outages then prove that they log no ERROR. radar-jersey
+   itself gets a contract test for its status → level table.
+4. **End-to-end log check.** After the RADAR-Kubernetes behave e2e run, collect the logs of the core services and
+   report any ERROR line. It is report-only at first, with an allowlist for known open items. New fault scenarios:
+   truncated upload, expired token, unknown topic, oversized body.
+5. **Review.** A PR-template checklist item ("new or changed log statements and thrown exceptions follow RFC
+   0009"), and an AI-assisted review that checks a PR's diff against the policy.
+6. **Feedback from production.** A Sentry issue that turns out not to be an application problem gets a label
+   (e.g. `escalation-level`) and becomes a bug in the repository concerned. The share of such issues is the
+   success measure of this RFC.
+
 Compatibility and migration
 ---------------------------
 - **No API change for valid traffic.** Some failure responses get a more correct status:
@@ -195,6 +239,10 @@ Operational considerations
   deployments within their Sentry quota (one deployment currently exhausts its monthly quota in two days).
 - Pod logs keep INFO and WARN lines, so operational visibility doesn't drop.
 - Rollback: deploy the previous image or chart version. The change has no persistent state.
+- Enforcement rollout, per repository:
+  1. report-only, with a detekt baseline and an e2e allowlist;
+  2. blocking for new code;
+  3. baselines and allowlist emptied as the services are fixed.
 
 Security and privacy
 --------------------
@@ -208,7 +256,9 @@ Testing strategy
 ----------------
 - Unit tests in radar-jersey asserting the log level per status and for a client disconnect (log4j2 test
   appender).
-- Gateway unit and integration tests for the reclassified paths.
+- Gateway unit and integration tests for the reclassified paths, using the ERROR-fails-the-test extension
+  (Enforcement, layer 3).
+- The detekt rules get their own unit tests in radar-commons (a positive and a negative example per rule).
 - An end-to-end run on a local k3d cluster, counting ERROR lines in the gateway log for:
   - a truncated upload (half the declared `Content-Length`, then close) → no ERROR;
   - a client closing the connection while the response is written → no ERROR;
@@ -227,8 +277,9 @@ Open questions
 3. Unwrap `ExecutionException` in radar-commons `suspendGet` for all callers?
 4. Is app-side batch splitting on 413 part of this RFC, or a separate RFC in the `mobile` area?
 5. Which other limits fall under rule 8 (e.g. the 30 s request timeout for slow uploads, record-count limits)?
-6. Should the policy be enforced in CI (e.g. a lint rule against `printStackTrace()` or logging ERROR in
-   exception mappers for 4xx)?
+6. When do the static checks and the e2e log check become blocking: right away for new code, or after the
+   first services are fixed?
+7. Should the AI-assisted PR review run automatically in CI (e.g. a GitHub Action), or only on request?
 
 References
 ----------
