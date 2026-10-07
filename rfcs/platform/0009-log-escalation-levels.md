@@ -4,7 +4,7 @@ Title: Log escalation levels – reserve ERROR for problems in the service itsel
 Author(s): Pim van Nierop (@pvannierop)
 Status: Draft
 Created: 2026-10-06
-Updated: 2026-10-06
+Updated: 2026-10-07
 Discussion: <pre-RFC issue to be opened>
 ---
 
@@ -50,6 +50,11 @@ An analysis of RADAR-Gateway 0.9.5 with radar-jersey 0.12.9 found the following.
 6. Several places log an ERROR and then throw an exception that the mapper logs again (duplicate events).
 7. Jackson parse errors are logged with a snippet of the request body (possible personal data).
 
+Not every 4xx is noise, though. On a production deployment, a 413 from the gateway's `maxRequestSize` limit
+(24 MiB) appeared in Sentry and made an operator raise the limit. Until then, phones with a large backlog could
+not upload: the app resends the same rejected batch, so that topic's data stays stuck on the device. That event
+must stay visible. It is not a client fault but a sign that a platform limit doesn't fit the deployment.
+
 Measurable goals:
 - No ERROR events from client faults, client disconnects or dependency outages in the services that adopted the
   policy: every remaining Sentry issue points at a bug or a misconfiguration.
@@ -70,9 +75,9 @@ When writing or reviewing code that logs, choose the level by asking *who has to
 
 | Level | Use for | Examples | Stack trace |
 |---|---|---|---|
-| **ERROR** | A bug in the service, or a deployment misconfiguration only a developer/operator can fix | unhandled exception (500), serializing already-validated data fails, Kafka authentication/authorization failure, invalid configuration at startup | yes |
+| **ERROR** | A bug in the service, or a deployment misconfiguration only a developer/operator can fix | unhandled exception (500), serializing already-validated data fails, Kafka authentication/authorization failure, invalid configuration at startup, a valid request rejected by the platform's own limits (413 from `maxRequestSize`, see rule 8) | yes |
 | **WARN** | Degraded operation the service survives: a dependency is down or slow, a retry or fallback happened | Kafka, schema registry, S3 or Management Portal unreachable or timing out (502/503/504), request timeout | no (DEBUG may log it) |
-| **INFO** | Incorrect use by a client, and natural events | any 4xx (bad input, missing/expired token, forbidden, not found, too large, invalid content), client disconnected | no |
+| **INFO** | Incorrect use by a client, and natural events | 4xx (bad input, missing/expired token, forbidden, not found, invalid content; not 413, see rule 8), client disconnected | no |
 | **DEBUG** | Expected noise and details of the above | stack traces of non-errors, client aborted while the response was written | – |
 
 Rules:
@@ -87,6 +92,15 @@ Rules:
 6. **Attach the stack trace only to ERROR**, and no `printStackTrace()`.
 7. **Configuration filters are a fallback** for third-party loggers whose code we can't change. Raising the
    Sentry threshold or sampling hides real errors too, so it's not the fix.
+8. **The platform's own limits are configuration, not client fault.** When a well-behaved client (our own app)
+   sends a valid request that the service rejects because of a configured limit (request size, record count,
+   timeout), the limit doesn't fit the deployment: an operator has to act, and until then data stays stuck on the
+   device. That is ERROR, with the limit and the affected resource (e.g. topic) in the message.
+   - A single item over the limit (nothing the client can split) stays ERROR.
+   - A batch over the limit stays ERROR only while the client can't recover. Once the client splits a rejected
+     batch and retries by itself, it is WARN.
+   - Limits also get a metric (rejection counter, size histogram), so monitoring can warn while requests are
+     *approaching* the limit. Sentry only reports after the fact.
 
 Example: a phone uploads a binary record set and loses its connection halfway.
 
@@ -101,8 +115,8 @@ Reference-level design
 - A helper `Throwable.isClientDisconnect()` walks the cause chain for `EOFException` (including Jackson's
   `JsonEOFException`), a Grizzly read `TimeoutException`, and `IOException` messages "Connection is closed",
   "Connection reset by peer", "Broken pipe", "Locally closed" and "Remotely closed".
-- A shared level selection for the mappers: 4xx → INFO; 502/503/504 → WARN; other 5xx → ERROR with the
-  exception attached.
+- A shared level selection for the mappers: 4xx → INFO, except 413 → ERROR (rule 8); 502/503/504 → WARN; other
+  5xx → ERROR with the exception attached.
 - `HttpApplicationExceptionMapper`, `WebApplicationExceptionMapper`: use the shared level selection.
 - `JsonProcessingExceptionMapper`: INFO; log the exception class and `originalMessage` only, without the source
   location, so no body snippet is logged or returned.
@@ -123,6 +137,8 @@ Reference-level design
 - Kafka admin errors (topic listing) → WARN without stack trace; S3 errors → WARN instead of
   `printStackTrace()`.
 - Remove duplicate log lines and a dead error branch.
+- 413 from `maxRequestSize` (`SizeLimitInterceptor` / `LimitedInputStream`, also applied after decompression) stays
+  ERROR; its message names the limit, the topic and the bytes read.
 - `log4j2.xml`: a filter on the Sentry appender that drops Jersey's `SEVERE` message for a client disconnect
   after the response was committed.
 
@@ -133,12 +149,28 @@ The same analysis is repeated per service, one at a time. Expected follow-ups so
   refetch → WARN, once per key id.
 - Spring-based services (ManagementPortal, Appserver): the same policy applied to their exception handlers.
 
+### Follow-ups for the request size limit
+
+- **Upload clients split a batch on 413.** radar-commons-android caps an upload at 1000 records and 5 MB of
+  *cache* bytes, which doesn't bound the size on the wire, and on failure it resends the same batch. It should
+  halve the batch and retry, down to one record; a single record still over the limit is reported app-side. Once
+  released, the gateway's 413 becomes WARN (rule 8). Other upload clients (questionnaire app, iOS) need the same.
+  This may need its own RFC in the `mobile` area.
+- **One source for the size limit in the radar-gateway chart.** The ingress annotation
+  `nginx.ingress.kubernetes.io/proxy-body-size: 24m` (compressed body) and `serverProperties.maxRequestSize`
+  (decompressed body) are set separately. nginx's 413s never reach the gateway log or Sentry, so raising only
+  `maxRequestSize` can leave uploads failing silently. Derive the annotation from `maxRequestSize`.
+- **Gateway metrics.** The gateway has no application metrics endpoint yet. A counter of rejected oversized
+  requests per topic and a request-size histogram need one; that is a separate change from the log levels.
+
 Compatibility and migration
 ---------------------------
 - **No API change for valid traffic.** Some failure responses get a more correct status:
   - dependency outages change from 400/422/500 to 503/504;
   - client disconnects change from 500 to 400 (the client is gone, so it rarely sees it).
   Clients that retry on 5xx will now correctly retry outages.
+- **413 keeps its ERROR level and status for now.** It moves to WARN once the upload clients split rejected
+  batches.
 - **Logs:** dashboards or alerts that count ERROR lines in pod logs will see fewer. Alerting on outages should use
   metrics, not log levels.
 - **Rollout order:** radar-jersey release (0.12.10), then each service bumps it and applies its own changes, then
@@ -183,6 +215,8 @@ Testing strategy
   - missing/expired token, unknown topic, invalid content → no ERROR, correct 4xx;
   - Kafka scaled to zero → WARN and 503/504, no ERROR;
   - schema registry scaled to zero → WARN and 503, no 400/422;
+  - a body over `maxRequestSize` → ERROR 413 naming the limit and topic; a body over the ingress
+    `proxy-body-size` → nothing in the gateway log (documents the gap);
   - a genuinely unhandled exception → still ERROR with stack trace.
 
 Open questions
@@ -191,7 +225,9 @@ Open questions
    check), or none at all, leaving it to monitoring?
 2. Should client 401/403 be INFO, or WARN to keep them more visible in pod logs?
 3. Unwrap `ExecutionException` in radar-commons `suspendGet` for all callers?
-4. Should the policy be enforced in CI (e.g. a lint rule against `printStackTrace()` or logging ERROR in
+4. Is app-side batch splitting on 413 part of this RFC, or a separate RFC in the `mobile` area?
+5. Which other limits fall under rule 8 (e.g. the 30 s request timeout for slow uploads, record-count limits)?
+6. Should the policy be enforced in CI (e.g. a lint rule against `printStackTrace()` or logging ERROR in
    exception mappers for 4xx)?
 
 References
