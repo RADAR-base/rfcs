@@ -112,6 +112,113 @@ Example: a phone uploads a binary record set and loses its connection halfway.
   `ERROR [400] POST topics/... bad_content`, i.e. two error-tracker events.
 - After: `INFO [400] POST topics/...: client disconnected (EOFException)`, i.e. no error-tracker event.
 
+### Example: implementing a new REST endpoint
+
+A developer adds an endpoint to a Jersey-based service that lets the app upload a photo attached to a
+questionnaire answer:
+
+```
+POST /projects/{projectId}/subjects/{subjectId}/attachments
+```
+
+It reads the image body (up to a configured `maxAttachmentSize`), stores it in S3 and publishes a Kafka record
+that points to it. Before writing any `catch` block, the developer lists the failure modes and asks *who has to
+act* for each. Many of them are already handled by radar-jersey; the last column shows what is left to the
+developer.
+
+| Failure | Who acts? | Status | Level | Handled by |
+|---|---|---|---|---|
+| Token missing, invalid or expired | the client | 401 | INFO | radar-jersey: `AuthenticationFilter` |
+| No permission | the client | 403 | INFO | radar-jersey: `@NeedsPermission` / `AuthService` |
+| Project or subject unknown | the client | 404 | INFO | radar-jersey: `ProjectService.ensureSubject()` (the developer calls it, or uses `@NeedsPermission` with the path parameters) |
+| Malformed JSON body (data-class body parameter) | the client | 400 | INFO | radar-jersey: `JsonProcessingExceptionMapper` |
+| Client disconnects while Jersey reads a JSON body | nobody | (400) | INFO | radar-jersey: `UnhandledExceptionMapper` with `isClientDisconnect()` |
+| Client disconnects while the response is written | nobody | – | DEBUG | radar-jersey: `ClientAbortExceptionWriterInterceptor` |
+| Client disconnects while *the endpoint* reads a raw `InputStream` | nobody | (400) | INFO | **developer**: classify the `IOException` |
+| Body parses but is invalid for the endpoint (not an image, bad metadata) | the client | 422 | INFO | **developer**: validate and throw a 4xx |
+| S3 or Kafka unreachable or timing out | monitoring | 503/504 | WARN | **developer**: map the dependency's exceptions to 503/504; unwrap `ExecutionException` |
+| A photo from our own app exceeds `maxAttachmentSize` | an operator | 413 | ERROR | **developer**: the limit belongs to the endpoint (rule 8); name the limit and add a metric |
+| Kafka authorization failure | an operator | 500 | ERROR + stack | **developer** must *not* catch it as an outage; then `UnhandledExceptionMapper` handles it |
+| Bug (NPE, serializing our own record fails) | a developer | 500 | ERROR + stack | radar-jersey: `UnhandledExceptionMapper`; don't catch it |
+| Logging all of the above at the right level | – | – | – | radar-jersey mappers (shared level selection) |
+
+The developer is therefore responsible for four things: calls to dependencies, the endpoint's own body handling,
+the endpoint's own limits and semantic validation. Two things they don't do: log before throwing (the mapper logs
+it, rule 3), and catch exceptions they can't classify (an unknown exception should reach `UnhandledExceptionMapper`,
+because that is a real ERROR). The endpoint throws and never logs:
+
+```kotlin
+@POST
+@Path("attachments")
+@Consumes("image/*")
+@NeedsPermission(Permission.MEASUREMENT_CREATE, "projectId", "subjectId") // 401/403/404: radar-jersey
+fun upload(
+    @PathParam("projectId") projectId: String,
+    @PathParam("subjectId") subjectId: String,
+    @HeaderParam("Content-Length") contentLength: Long?,
+    body: InputStream,
+): Response {
+    // Rule 8: our own app sends valid photos. If they don't fit, the limit is wrong for this
+    // deployment: ERROR, naming the limit and the resource so an operator knows what to raise.
+    if (contentLength != null && contentLength > config.maxAttachmentSize) {
+        attachmentRejections.increment() // lets monitoring warn before the limit is hit
+        throw HttpPlatformLimitException(
+            "Attachment of $contentLength bytes exceeds maxAttachmentSize=${config.maxAttachmentSize} " +
+                "(project $projectId)",
+        )
+    }
+
+    val bytes = try {
+        body.readNBytes(config.maxAttachmentSize + 1)
+    } catch (ex: IOException) {
+        // Rule 1: classify by cause. A dropped connection is a natural event (INFO).
+        if (ex.isClientDisconnect()) throw HttpBadRequestException("client_disconnected", "Upload interrupted")
+        throw ex // anything else is unexpected: 500 with stack trace
+    }
+    if (!imageValidator.isValid(bytes)) {
+        // Client fault: 422, INFO. Don't put the content in the message (rule 5).
+        throw HttpInvalidContentException("Attachment is not a supported image")
+    }
+
+    val key = try {
+        storage.put(projectId, subjectId, bytes)
+    } catch (ex: SdkClientException) {
+        // Dependency outage: 503, WARN. Never a 4xx (rule 2).
+        throw HttpDependencyUnavailableException("Object storage unavailable")
+    }
+
+    try {
+        producer.send(record(projectId, subjectId, key)).get(10, SECONDS)
+    } catch (ex: ExecutionException) {
+        // Unwrap first, otherwise every Kafka outage becomes a generic 500 with stack trace.
+        when (val cause = ex.cause) {
+            is RetriableException -> throw HttpDependencyUnavailableException("Kafka unavailable")
+            // AuthorizationException, serialization of our own record, …: misconfiguration or bug.
+            else -> throw cause ?: ex
+        }
+    } catch (ex: TimeoutException) {
+        throw HttpGatewayTimeoutException("Kafka did not acknowledge in time")
+    }
+
+    return Response.created(URI("attachments/$key")).build()
+}
+```
+
+`HttpPlatformLimitException`, `HttpDependencyUnavailableException` and `isClientDisconnect()` are proposed below
+(radar-jersey and Enforcement); the other exception types exist in radar-jersey today.
+
+Traps to avoid:
+
+- A broad `catch (ex: IOException) { throw HttpBadRequestException(…) }` turns S3 or schema-registry outages into
+  400s, so the app may drop data it should retry (rules 1 and 2).
+- `logger.warn("…", ex)`: a stack trace belongs on ERROR only (rule 6). Log `ex.toString()`, or the stack at DEBUG.
+- Messages such as `"Invalid body: $json"` put participant data in the error tracker (rule 5).
+- Logging an outage as ERROR per request: it is WARN per request, and at most one event on the state transition
+  (rule 4).
+
+Tests assert the status and the level per failure mode. With the ERROR-fails-the-test extension (Enforcement,
+layer 3), only the 413, Kafka-authorization and bug tests need `@ExpectErrorLog`.
+
 Reference-level design
 ----------------------
 ### radar-jersey (shared; benefits every Jersey service)
